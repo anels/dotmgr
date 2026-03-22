@@ -11,31 +11,21 @@ function Invoke-DotAdd {
     }
 
     $config = Get-DotConfig
+    $excludePatterns = $config.excludePatterns
     $totalStaged = 0
 
     foreach ($p in $Path) {
-        # Resolve path: support ~ and relative paths
-        $resolved = if ($p.StartsWith('~')) {
-            $p -replace '^~', $HOME
-        } elseif (-not [System.IO.Path]::IsPathRooted($p)) {
-            Join-Path (Get-Location) $p
-        } else {
-            $p
-        }
-
-        $resolved = (Resolve-Path $resolved -ErrorAction SilentlyContinue).Path
-        if (-not $resolved) {
+        $result = Resolve-DotRelativePath -InputPath $p -MustExist
+        if ($result.Error -eq 'NotFound') {
             Write-DotError "Path not found: $p"
             continue
         }
-
-        # Make path relative to work tree
-        $workTreeNorm = $config.workTree.TrimEnd('\', '/')
-        if (-not $resolved.StartsWith($workTreeNorm, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Write-DotError "Path must be under home directory: $resolved"
+        if ($result.Error -eq 'OutsideWorkTree') {
+            Write-DotError "Path must be under home directory: $($result.AbsolutePath)"
             continue
         }
-        $relativePath = $resolved.Substring($workTreeNorm.Length).TrimStart('\', '/')
+        $relativePath = $result.RelativePath
+        $resolved = $result.AbsolutePath
 
         $isFolder = (Get-Item $resolved).PSIsContainer
 
@@ -44,7 +34,7 @@ function Invoke-DotAdd {
             $files = Get-ChildItem $resolved -Recurse -File
             $blocked = @()
             foreach ($file in $files) {
-                $check = Test-PathSafe -Path $file.FullName -Force:$Force
+                $check = Test-PathSafe -Path $file.FullName -Force:$Force -ExcludePatterns $excludePatterns
                 if (-not $check.Safe) {
                     $blocked += @{ File = $file.Name; Issues = $check.Issues }
                 }
@@ -59,15 +49,7 @@ function Invoke-DotAdd {
             }
 
             Invoke-DotGit add $relativePath 2>$null | Out-Null
-
-            # Register folder for auto-tracking
-            $config = Get-DotConfig
-            if ($relativePath -notin $config.trackedFolders) {
-                $folders = [System.Collections.ArrayList]@($config.trackedFolders)
-                $folders.Add($relativePath) | Out-Null
-                $config.trackedFolders = @($folders)
-                Set-DotConfig -Config $config
-            }
+            Add-DotTrackedFolder -Folder $relativePath
 
             $fileCount = $files.Count
             $totalStaged += $fileCount
@@ -75,7 +57,7 @@ function Invoke-DotAdd {
             Write-DotInfo "Folder registered for auto-tracking."
         } else {
             # Single file
-            $check = Test-PathSafe -Path $resolved -Force:$Force
+            $check = Test-PathSafe -Path $resolved -Force:$Force -ExcludePatterns $excludePatterns
             if (-not $check.Safe) {
                 Write-DotWarning "Blocked: $relativePath"
                 foreach ($issue in $check.Issues) {

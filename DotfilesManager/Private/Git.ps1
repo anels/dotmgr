@@ -27,12 +27,63 @@ function Test-DotRepo {
     }
 }
 
+function Test-GitAvailable {
+    $version = & git --version 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        return $version
+    }
+    return $null
+}
+
 function Update-TrackedFolders {
     $config = Get-DotConfig
-    foreach ($folder in $config.trackedFolders) {
-        $fullPath = Join-Path $config.workTree $folder
-        if (Test-Path $fullPath) {
-            Invoke-DotGit add $folder 2>$null | Out-Null
-        }
+    $existing = @($config.trackedFolders | Where-Object {
+        Test-Path (Join-Path $config.workTree $_)
+    })
+    if ($existing.Count -gt 0) {
+        Invoke-DotGit add @existing 2>$null | Out-Null
     }
+}
+
+function Resolve-DotRelativePath {
+    param(
+        [string]$InputPath,
+        [switch]$MustExist,
+        [switch]$ForwardSlash
+    )
+
+    $config = Get-DotConfig
+
+    # Expand ~ and resolve relative paths
+    $resolved = if ($InputPath.StartsWith('~')) {
+        $InputPath -replace '^~', $HOME
+    } elseif (-not [System.IO.Path]::IsPathRooted($InputPath)) {
+        Join-Path (Get-Location) $InputPath
+    } else {
+        $InputPath
+    }
+
+    # Try to resolve to real filesystem path
+    $resolvedFull = (Resolve-Path $resolved -ErrorAction SilentlyContinue).Path
+    if ($resolvedFull) {
+        $resolved = $resolvedFull
+    } elseif ($MustExist) {
+        return @{ RelativePath = $null; AbsolutePath = $null; Error = 'NotFound' }
+    }
+
+    # Make relative to work tree (workTree is pre-normalized by Get-DotConfig)
+    $workTree = $config.workTree
+    if ($resolved.StartsWith($workTree, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relativePath = $resolved.Substring($workTree.Length).TrimStart('\', '/')
+    } elseif (-not $MustExist) {
+        $relativePath = $InputPath.TrimStart('\', '/', '~').TrimStart('\', '/')
+    } else {
+        return @{ RelativePath = $null; AbsolutePath = $resolved; Error = 'OutsideWorkTree' }
+    }
+
+    if ($ForwardSlash) {
+        $relativePath = $relativePath -replace '\\', '/'
+    }
+
+    return @{ RelativePath = $relativePath; AbsolutePath = $resolved; Error = $null }
 }

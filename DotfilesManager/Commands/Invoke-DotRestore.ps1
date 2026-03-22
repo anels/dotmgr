@@ -11,24 +11,8 @@ function Invoke-DotRestore {
 
     if ($Path) {
         # Restore single file
-        $resolved = if ($Path.StartsWith('~')) {
-            $Path -replace '^~', $HOME
-        } elseif (-not [System.IO.Path]::IsPathRooted($Path)) {
-            Join-Path (Get-Location) $Path
-        } else {
-            $Path
-        }
-
-        $config = Get-DotConfig
-        $workTreeNorm = $config.workTree.TrimEnd('\', '/')
-        $resolvedFull = (Resolve-Path $resolved -ErrorAction SilentlyContinue).Path
-        if ($resolvedFull) { $resolved = $resolvedFull }
-
-        if ($resolved.StartsWith($workTreeNorm, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $relativePath = $resolved.Substring($workTreeNorm.Length).TrimStart('\', '/')
-        } else {
-            $relativePath = $Path.TrimStart('\', '/', '~').TrimStart('\', '/')
-        }
+        $result = Resolve-DotRelativePath -InputPath $Path
+        $relativePath = $result.RelativePath
 
         Invoke-DotGit checkout -- $relativePath 2>$null
         if ($LASTEXITCODE -eq 0) {
@@ -45,10 +29,9 @@ function Invoke-DotRestore {
             return
         }
 
-        $trackedFiles = @(Invoke-DotGit ls-files)
         Invoke-DotGit checkout -- . 2>$null
         if ($LASTEXITCODE -eq 0) {
-            Write-DotSuccess "Restored $($trackedFiles.Count) files to last committed version"
+            Write-DotSuccess "Restored all tracked files to last committed version"
         } else {
             Write-DotError "Restore failed."
         }

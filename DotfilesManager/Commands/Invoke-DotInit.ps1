@@ -15,8 +15,8 @@ function Invoke-DotInit {
     }
 
     # Check git is available
-    $gitVersion = & git --version 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $gitVersion = Test-GitAvailable
+    if (-not $gitVersion) {
         Write-DotError "git not found. Please install git first."
         return
     }
@@ -38,11 +38,7 @@ function Invoke-DotInit {
         $defaultOptions = @()
 
         # Detect OneDrive path
-        $possibleOneDrive = @(
-            (Join-Path $HOME 'OneDrive'),
-            (Join-Path $HOME 'OneDrive - UiPath'),
-            $env:OneDrive
-        ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+        $possibleOneDrive = Get-OneDriveCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
         if ($possibleOneDrive) {
             $oneDrivePath = Join-Path $possibleOneDrive 'repos' 'dotfiles.git'
@@ -147,6 +143,7 @@ function Invoke-DotInit {
 
         if ($toAdd.Count -gt 0) {
             $addedFiles = 0
+            $foldersToTrack = @()
             foreach ($path in $toAdd) {
                 $fullPath = Join-Path $workTree $path
                 $isFolder = (Get-Item $fullPath).PSIsContainer
@@ -154,14 +151,7 @@ function Invoke-DotInit {
                 Invoke-DotGit add $path 2>$null | Out-Null
 
                 if ($isFolder) {
-                    # Register folder for auto-tracking
-                    $config = Get-DotConfig
-                    if ($path -notin $config.trackedFolders) {
-                        $folders = [System.Collections.ArrayList]@($config.trackedFolders)
-                        $folders.Add($path) | Out-Null
-                        $config.trackedFolders = @($folders)
-                        Set-DotConfig -Config $config
-                    }
+                    $foldersToTrack += $path
                     $fileCount = (Get-ChildItem $fullPath -Recurse -File).Count
                     $addedFiles += $fileCount
                     Write-DotSuccess "Staged: $path ($fileCount files)"
@@ -169,6 +159,12 @@ function Invoke-DotInit {
                     $addedFiles++
                     Write-DotSuccess "Staged: $path"
                 }
+            }
+
+            if ($foldersToTrack.Count -gt 0) {
+                $config = Get-DotConfig
+                $config.trackedFolders = @($config.trackedFolders) + $foldersToTrack | Select-Object -Unique
+                Set-DotConfig -Config $config
             }
 
             # Also track the .dotfiles directory itself

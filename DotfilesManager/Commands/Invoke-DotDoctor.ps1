@@ -4,8 +4,8 @@ function Invoke-DotDoctor {
     $allGood = $true
 
     # Check git
-    $gitVersion = & git --version 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $gitVersion = Test-GitAvailable
+    if ($gitVersion) {
         Write-DotSuccess "git found: $gitVersion"
     } else {
         Write-DotError "git not found in PATH"
@@ -41,8 +41,7 @@ function Invoke-DotDoctor {
     }
 
     # Check if repo is on OneDrive
-    $oneDrivePaths = @($env:OneDrive, (Join-Path $HOME 'OneDrive'), (Join-Path $HOME 'OneDrive - UiPath')) |
-        Where-Object { $_ }
+    $oneDrivePaths = @(Get-OneDriveCandidates)
     $onOneDrive = $oneDrivePaths | Where-Object { $config.repoPath.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase) }
     if ($onOneDrive) {
         Write-DotSuccess "Repo is on OneDrive (cloud backup active)"

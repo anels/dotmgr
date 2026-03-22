@@ -1,13 +1,18 @@
 function Test-PathSafe {
     param(
         [string]$Path,
-        [switch]$Force
+        [switch]$Force,
+        [string[]]$ExcludePatterns
     )
-    $config = Get-DotConfig
+
+    if (-not $ExcludePatterns) {
+        $ExcludePatterns = (Get-DotConfig).excludePatterns
+    }
+
     $issues = @()
 
     $leaf = Split-Path $Path -Leaf
-    foreach ($pattern in $config.excludePatterns) {
+    foreach ($pattern in $ExcludePatterns) {
         if ($leaf -like $pattern -or $Path -like $pattern) {
             $issues += "Matches exclude pattern: $pattern"
         }
